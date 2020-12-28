@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 
 # Copyright (c) 2014, Evgeni Golov
+# Copyright (c) 2020, Yehuda Katz
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without modification,
@@ -41,7 +42,8 @@ my $np = Monitoring::Plugin->new(
       . "[ -c|--critical=<minutes> ] [ -W|--warnfails=<num> ] "
       . "[ -C|--critfails=<num> ] [ -n|--node=<node> ]"
       . "[ -a|--apiversion=<num> ]"
-      . "[ -i|--ignore=<list> ]",
+      . "[ -i|--ignore=<list> ]"
+      . "[ -E|--environment=<list> ]",
     shortname => 'Check last node runs from PuppetDB',
     url       => 'https://github.com/evgeni/check_puppetdb_nodes',
     version   => '1.0',
@@ -117,6 +119,12 @@ $np->add_arg(
     default => '',
 );
 
+$np->add_arg(
+    spec    => 'environment|E=s',
+    help    => 'Warn if node is not in one of these environments (comma-separated list) (default: %s)',
+    default => 'production',
+);
+
 $np->getopts;
 
 my %apiurls = (
@@ -128,6 +136,8 @@ if ( !exists $apiurls{$np->opts->apiversion} ) {
 }
 
 my @ignore_list = split( ',', $np->opts->ignore );
+
+my @environment_list = split( ',', $np->opts->environment );
 
 my $url = sprintf( 'http%s://%s:%d/',
     defined( $np->opts->ssl ) ? 's' : '',
@@ -162,11 +172,12 @@ if ( defined( $np->opts->node ) and !@$data ) {
 }
 
 foreach my $node (@$data) {
-    my $certname          = defined($node->{'certname'}) ? $node->{'certname'} : $node->{'name'} ;
-    my $deactivated       = $node->{'deactivated'};
-    my $catalog_timestamp = $node->{'catalog_timestamp'};
-    my $report_hash       = $node->{'latest_report_hash'};
-    my $ts                = str2time($catalog_timestamp);
+    my $certname            = defined($node->{'certname'}) ? $node->{'certname'} : $node->{'name'} ;
+    my $deactivated         = $node->{'deactivated'};
+    my $catalog_timestamp   = $node->{'catalog_timestamp'};
+    my $catalog_environment = $node->{'catalog_environment'};
+    my $report_hash         = $node->{'latest_report_hash'};
+    my $ts                  = str2time($catalog_timestamp);
 
     next if grep { $certname eq $_ } @ignore_list;
 
@@ -183,6 +194,11 @@ foreach my $node (@$data) {
         elsif ( $delta > ( $np->opts->warning * 60 ) ) {
             $np->add_message( WARNING,
                 "$certname did not update since $catalog_timestamp\n" );
+        }
+
+        if (not grep { $catalog_environment eq $_ } @environment_list) {
+            $np->add_message( WARNING,
+                "$certname is in environment $catalog_environment\n" );
         }
 
         my %apiparameters = (
